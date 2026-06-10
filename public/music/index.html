@@ -1428,6 +1428,26 @@
                                             <option value="all">全部显示</option>
                                         </select>
                                     </div>
+
+                                    <!-- 默认入口 -->
+                                    <div
+                                        class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow flex flex-col gap-3">
+                                        <h4 class="text-sm font-bold t-text-main flex items-center">
+                                            <i class="fas fa-sign-in-alt mr-2 text-emerald-500"></i> 默认入口
+                                            <span class="setting-tooltip-trigger ml-1">
+                                                <i class="fas fa-question-circle"></i>
+                                                <span class="setting-tooltip-content">设置页面刷新时默认显示的Tab页面</span>
+                                            </span>
+                                        </h4>
+                                        <select onchange="updateSetting('defaultEntry', this.value)" id="setting-default-entry"
+                                            class="lm-select !w-full !py-2">
+                                            <option value="search">搜索</option>
+                                            <option value="songlist">歌单</option>
+                                            <option value="leaderboard">排行榜</option>
+                                            <option value="favorites" selected>我的收藏 (默认)</option>
+                                            <option value="localmusic">本地音乐</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
 

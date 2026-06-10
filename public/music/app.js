@@ -65,6 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Settings & Batch Selection
 const DEFAULT_SETTINGS = {
     itemsPerPage: 20, // Default 20 items per page, can be 'all'
+    defaultEntry: 'favorites', // 默认入口: 'search' | 'songlist' | 'leaderboard' | 'favorites' | 'localmusic'
     preferredQuality: '320k', // 默认音质偏好
     enablePublicSources: true, // 是否显示公开源
     enableProxyPlayback: false, // 播放音乐代理
@@ -2747,14 +2748,43 @@ async function findOtherSourceMatch(song) {
     if (!song.name || !song.singer) return null;
 
     try {
+        // 1. 获取当前自定义源支持解析的平台（支持的平台）
+        const list = await fetchCustomSources();
+        let supportedPlatforms = null;
+        if (Array.isArray(list)) {
+            supportedPlatforms = new Set();
+            list.forEach(src => {
+                if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
+                    src.supportedSources.forEach(platform => {
+                        supportedPlatforms.add(platform);
+                    });
+                }
+            });
+        }
+
+        // 2. 切换到和当前不同源，并且根据优先级排列 (网易、QQ、酷我、酷狗、咪咕)
+        const baseOrder = ['wy', 'tx', 'kw', 'kg', 'mg'];
+        const searchSourcesOrdered = baseOrder.filter(s => s !== song.source);
+
+        // 3. 过滤出自定义源支持解析的平台
+        let searchSources = searchSourcesOrdered;
+        if (supportedPlatforms) {
+            searchSources = searchSourcesOrdered.filter(s => supportedPlatforms.has(s));
+        }
+
+        // 4. 如果发现没有其他支持的平台可供切换
+        if (searchSources.length === 0) {
+            console.log(`[AutoSource] 换源跳过：没有其他自定义源支持的平台。当前源: ${song.source}`);
+            showError('未找到自定义源下支持的平台下的对应歌曲');
+            return null;
+        }
+
         const query = `${song.name} ${song.singer}`;
         const headers = { 'Content-Type': 'application/json' };
         Object.assign(headers, getUserAuthHeaders());
 
         showInfo('正在自动尝试换源匹配...');
 
-        // 仅在主流源中搜索
-        const searchSources = ['kw', 'kg', 'tx', 'wy', 'mg'].filter(s => s !== song.source);
         const searchPromises = searchSources.map(s =>
             fetch(`${API_BASE}/search?name=${encodeURIComponent(query)}&source=${s}&page=1`, { headers })
                 .then(res => res.json())
@@ -4428,14 +4458,20 @@ function savePlaybackState() {
 }
 
 async function restorePlaybackState() {
-    if (!settings.autoResume) return;
+    if (!settings.autoResume) {
+        return;
+    }
 
     try {
         const saved = localStorage.getItem('lx_playback_state');
-        if (!saved) return;
+        if (!saved) {
+            return;
+        }
 
         const state = JSON.parse(saved);
-        if (!state || !state.song) return;
+        if (!state || !state.song) {
+            return;
+        }
 
         console.log('[Resume] 正在恢复上次内容:', state.song.name, '队列长度:', state.playlist ? state.playlist.length : 0);
 
@@ -4471,16 +4507,12 @@ async function restorePlaybackState() {
             song: state.song
         };
 
-        // 5. 延迟加载播放源（静默模式）并同步 Tab 状态
+        // 5. 延迟加载播放源（静默模式）但不强制切换 Tab 破坏默认入口设置
         setTimeout(() => {
             if (state.scope === 'network') {
-                switchTab('search');
                 renderResults(currentPlaylist);
             } else if (state.scope === 'local_list' || state.scope === 'local_all') {
-                switchTab('favorites');
                 window._pendingResumeListId = state.listId || 'default';
-            } else if (state.scope === 'songlist') {
-                switchTab('songlist');
             }
 
             // 初始化音频源但不立即播放（除非设置了自动播放，当前 playSong handles resumeTime）
@@ -5096,6 +5128,7 @@ async function updateSetting(key, value) {
 // 核心设置项映射表: [key]: { id: 'element-id', type: 'checkbox|value|custom', action: (val) => { ... } }
 const SETTINGS_UI_MAP = {
     // 逻辑 (Logic)
+    defaultEntry: { id: 'setting-default-entry', type: 'value' },
     switchPlaylistOnSearchPlay: { id: 'setting-switch-playlist-search', type: 'checkbox' },
     switchPlaylistOnSongListPlay: { id: 'setting-switch-playlist-songlist', type: 'checkbox' },
     autoResume: { id: 'setting-auto-resume', type: 'checkbox' },
@@ -8752,6 +8785,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.error('[Cache] 恢复列表数据失败:', e);
     }
 
+    // [New] Switch to the user's default entry tab on load
+    const defaultTab = settings.defaultEntry || 'favorites';
+    switchTab(defaultTab);
+
     // 2. Auto-reconnect or auto-login
     const syncMode = localStorage.getItem('lx_sync_mode');
 
@@ -12237,10 +12274,18 @@ window.CustomSelectManager = {
     },
     updateHighlight(select, wrapper) {
         const val = select.value;
-        if (val && !['all', 'none', 'root', 'mtime', 'desc', 'wy', '20', 'song'].includes(val)) {
-            wrapper.classList.add('highlight');
-        } else {
+        let isDefault = false;
+        if (select.id && typeof SETTINGS_UI_MAP !== 'undefined' && typeof DEFAULT_SETTINGS !== 'undefined') {
+            const key = Object.keys(SETTINGS_UI_MAP).find(k => SETTINGS_UI_MAP[k].id === select.id);
+            if (key && DEFAULT_SETTINGS[key] !== undefined) {
+                isDefault = (String(val) === String(DEFAULT_SETTINGS[key]));
+            }
+        }
+        
+        if (!select.id || isDefault || ['all', 'none', 'root', 'mtime', 'desc', 'wy', '20', 'song'].includes(val)) {
             wrapper.classList.remove('highlight');
+        } else {
+            wrapper.classList.add('highlight');
         }
     },
     closeAll() {
