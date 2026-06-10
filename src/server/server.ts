@@ -4496,6 +4496,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'subsonic.enable': global.lx.config['subsonic.enable'] ?? true,
             'subsonic.path': global.lx.config['subsonic.path'] ?? '/rest',
             'singer.sourcePriority': (global.lx.config['singer.sourcePriority'] || ['tx', 'wy']).join(','),
+            'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -4521,6 +4522,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['user.enableLoginCacheRestriction'] !== undefined) global.lx.config['user.enableLoginCacheRestriction'] = newConfig['user.enableLoginCacheRestriction']
               if (newConfig['user.enableCacheSizeLimit'] !== undefined) global.lx.config['user.enableCacheSizeLimit'] = newConfig['user.enableCacheSizeLimit']
               if (newConfig['user.cacheSizeLimit'] !== undefined) global.lx.config['user.cacheSizeLimit'] = parseInt(newConfig['user.cacheSizeLimit']) || 2000
+              if (newConfig['system.allowUnsafeVM'] !== undefined) global.lx.config['system.allowUnsafeVM'] = newConfig['system.allowUnsafeVM']
 
               let warning = ''
 
@@ -4626,6 +4628,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'player.path': global.lx.config['player.path'] ?? '/music',
                 'subsonic.enable': global.lx.config['subsonic.enable'],
                 'subsonic.path': global.lx.config['subsonic.path'],
+                'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'],
                 users: global.lx.config.users.map(u => ({
                   name: u.name,
                   password: u.password,

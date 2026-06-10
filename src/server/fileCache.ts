@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import http from 'http'
 import https from 'https'
+import crypto from 'crypto'
 import { PassThrough } from 'stream'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 import { buildLyrics, parseLyrics } from '../utils/lrcTool'
@@ -58,6 +59,21 @@ export const getCacheDir = (username?: string, isOnlyDownload?: boolean) => {
     // [New] Segment cache by username
     const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
 
+    const fullPath = path.join(baseDir, userDirName)
+    if (!fs.existsSync(fullPath)) {
+        fs.mkdirSync(fullPath, { recursive: true })
+    }
+    return fullPath
+}
+
+export const getCoverCacheDir = (username: string) => {
+    let baseDir = ''
+    if (currentCacheLocation === CACHE_ROOTS.DATA) {
+        baseDir = path.join(global.lx.dataPath, 'cover_cache')
+    } else {
+        baseDir = path.join(process.cwd(), 'cover_cache')
+    }
+    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
     const fullPath = path.join(baseDir, userDirName)
     if (!fs.existsSync(fullPath)) {
         fs.mkdirSync(fullPath, { recursive: true })
@@ -362,29 +378,36 @@ export const syncCacheIndex = async (username?: string) => {
         const dir = getCacheDir(normalizedUsername, folder === 'music')
         if (!fs.existsSync(dir)) continue
 
-        // [Unified Enhancement] Recursive file walker
-        const getAllFiles = (dirPath: string, acc: string[] = [], base: string = dirPath) => {
-            if (!fs.existsSync(dirPath)) return acc
-            const entries = fs.readdirSync(dirPath, { withFileTypes: true })
-            for (const entry of entries) {
-                const fullPath = path.join(dirPath, entry.name)
-                if (entry.isDirectory()) {
-                    getAllFiles(fullPath, acc, base)
-                } else {
-                    acc.push(path.relative(base, fullPath).replace(/\\/g, '/'))
+        // [Unified Enhancement] Recursive file walker (asynchronous)
+        const getAllFilesAsync = async (dirPath: string, base: string = dirPath): Promise<string[]> => {
+            const acc: string[] = []
+            try {
+                const exists = await fs.promises.access(dirPath).then(() => true).catch(() => false)
+                if (!exists) return acc
+                const entries = await fs.promises.readdir(dirPath, { withFileTypes: true })
+                for (const entry of entries) {
+                    const fullPath = path.join(dirPath, entry.name)
+                    if (entry.isDirectory()) {
+                        const subFiles = await getAllFilesAsync(fullPath, base)
+                        acc.push(...subFiles)
+                    } else {
+                        acc.push(path.relative(base, fullPath).replace(/\\/g, '/'))
+                    }
                 }
+            } catch (e) {
+                console.error(`[fileCache] error walking path: ${dirPath}`, e)
             }
             return acc
         }
 
-        const files = getAllFiles(dir)
+        const files = await getAllFilesAsync(dir)
         for (const file of files) {
             if (file === 'cache_index.json' || file === 'music_index.json') continue
             const ext = path.extname(file).toLowerCase()
             if (!extensions.includes(ext)) continue
 
             const filePath = path.join(dir, file)
-            const stats = fs.statSync(filePath)
+            const stats = await fs.promises.stat(filePath)
 
             // Try to find if this file is already known in index by its filename
             let existingEntry = filenameToItemMap.get(file)
@@ -437,7 +460,7 @@ export const syncCacheIndex = async (username?: string) => {
 
             // Always check for companion lyric file
             const lrcFile = file.substring(0, file.length - ext.length) + '.lrc'
-            const hasLyricOnDisk = fs.existsSync(path.join(dir, lrcFile))
+            const hasLyricOnDisk = await fs.promises.access(path.join(dir, lrcFile)).then(() => true).catch(() => false)
 
             let finalQuality = quality || 'unknown'
 
@@ -548,6 +571,9 @@ export const syncCacheIndex = async (username?: string) => {
             } else if (!oldKey) {
                 index.set(compositeKey, existing!)
             }
+
+            // Yield control back to Node.js event loop
+            await new Promise(resolve => setImmediate(resolve))
         }
 
         // Remove deleted files from index
@@ -848,8 +874,24 @@ export const linkLocalFile = async (oldFilename: string, songInfo: any, username
  */
 export const getCacheCover = (filename: string, username?: string) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
-    const roots: Array<'cache' | 'music'> = ['cache', 'music']
 
+    // Cover cache lookup
+    try {
+        const hash = crypto.createHash('md5').update(filename).digest('hex')
+        const coverCacheDir = getCoverCacheDir(normalizedUsername)
+        const binPath = path.join(coverCacheDir, `${hash}.bin`)
+        const mimePath = path.join(coverCacheDir, `${hash}.mime`)
+        
+        if (fs.existsSync(binPath) && fs.existsSync(mimePath)) {
+            const data = fs.readFileSync(binPath)
+            const mime = fs.readFileSync(mimePath, 'utf8')
+            return { data, mime }
+        }
+    } catch (e) {
+        console.error(`[Cache] Error reading cover cache for: ${filename}`, e)
+    }
+
+    const roots: Array<'cache' | 'music'> = ['cache', 'music']
     for (const folder of roots) {
         const dir = getCacheDir(normalizedUsername, folder === 'music')
         const filePath = path.join(dir, filename) // [Fix] Allow subfolders
@@ -861,12 +903,23 @@ export const getCacheCover = (filename: string, username?: string) => {
                 const pics = tagger.pictures
                 if (pics && pics.length > 0) {
                     const pic = pics[0]
-                    const result = {
-                        data: Buffer.from(pic.data),
-                        mime: pic.mimeType || 'image/jpeg'
-                    }
+                    const mime = pic.mimeType || 'image/jpeg'
+                    const data = Buffer.from(pic.data)
                     tagger.dispose()
-                    return result
+
+                    // Save to cover cache
+                    try {
+                        const hash = crypto.createHash('md5').update(filename).digest('hex')
+                        const coverCacheDir = getCoverCacheDir(normalizedUsername)
+                        const binPath = path.join(coverCacheDir, `${hash}.bin`)
+                        const mimePath = path.join(coverCacheDir, `${hash}.mime`)
+                        fs.writeFileSync(binPath, data)
+                        fs.writeFileSync(mimePath, mime)
+                    } catch (e) {
+                        console.error(`[Cache] Failed to write cover cache for ${filename}:`, e)
+                    }
+
+                    return { data, mime }
                 }
                 tagger.dispose()
             } catch (e) {
@@ -911,6 +964,16 @@ export const removeCacheFile = (filename: string, username?: string) => {
             if (item) {
                 indexManager.remove(normalizedUsername, item.id, folder)
             }
+
+            // [New] Delete associated cover cache if exists
+            try {
+                const hash = crypto.createHash('md5').update(filename).digest('hex')
+                const coverCacheDir = getCoverCacheDir(normalizedUsername)
+                const binPath = path.join(coverCacheDir, `${hash}.bin`)
+                const mimePath = path.join(coverCacheDir, `${hash}.mime`)
+                if (fs.existsSync(binPath)) fs.unlinkSync(binPath)
+                if (fs.existsSync(mimePath)) fs.unlinkSync(mimePath)
+            } catch (e) {}
 
             deleted = true
         }

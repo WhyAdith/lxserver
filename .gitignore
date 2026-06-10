@@ -84,3 +84,5 @@ dist-electron/
 /music/
 
 /public/music/bin
+
+.codegraph

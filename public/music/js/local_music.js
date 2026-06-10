@@ -502,7 +502,7 @@ window.LocalMusicManager = {
                              </div>`;
             if (item.hasCover) {
                 const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
-                const coverUrl = `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&t=${Date.now()}`;
+                const coverUrl = `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
                 coverHtml = `<img src="${coverUrl}" onerror="this.src='/music/assets/logo.svg'" loading="lazy" class="w-10 h-10 md:w-12 md:h-12 rounded-lg object-cover shadow-sm flex-shrink-0 border t-border-main mr-2.5 md:mr-4 ml-0.5 md:ml-3">`;
             }
 
@@ -717,7 +717,7 @@ window.LocalMusicManager = {
             ...item.songInfo,
             // Reconstruct full URL locally
             url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            pic: `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&t=${Date.now()}`,
+            pic: `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             isLocal: true,
             folder: item.folder
         };
@@ -727,7 +727,7 @@ window.LocalMusicManager = {
         const playlist = this.displayData.map(d => ({
             ...d.songInfo,
             url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            pic: `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&t=${Date.now()}`,
+            pic: `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             isLocal: true
         }));
 

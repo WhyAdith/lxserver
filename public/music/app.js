@@ -5508,7 +5508,7 @@ function renderCacheList() {
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null)
             || localStorage.getItem('lx_user_token') || '';
         const coverUrl = item.hasCover
-            ? `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&t=${Date.now()}`
+            ? `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`
             : '/music/assets/logo.svg';
 
         return `
@@ -8823,6 +8823,12 @@ async function handleFileUpload(input) {
 
         const validation = await validationRes.json();
 
+        if (validation.disabledVM) {
+            showError(validation.error || '已禁用VM。当前服务器已禁用 VM 模式。');
+            input.value = '';
+            return;
+        }
+
         if (!validation.valid && !validation.requireUnsafe) {
             showError(`脚本无效: ${validation.error}`);
             input.value = '';
@@ -8834,11 +8840,22 @@ async function handleFileUpload(input) {
         showInfo(`验证通过，正在上传 "${validation.metadata.name || file.name}"...`);
         let result = await uploadCustomSource(file.name, content, 'file');
 
+        if (result.disabledVM) {
+            showError(result.message || '已禁用VM');
+            input.value = '';
+            return;
+        }
+
         // 如果需要不安全模式确认
         if (result.requireUnsafe) {
             const confirmed = await showSelect('安全风险确认', result.message || '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？', { danger: true, confirmText: '允许并上传' });
             if (confirmed) {
                 result = await uploadCustomSource(file.name, content, 'file', true);
+                if (result.disabledVM) {
+                    showError(result.message || '已禁用VM');
+                    input.value = '';
+                    return;
+                }
             } else {
                 showInfo('已取消上传');
                 input.value = '';
@@ -8904,6 +8921,11 @@ async function handleUrlImport() {
 
         let result = await response.json();
 
+        if (result.disabledVM) {
+            showError(result.message || '已禁用VM');
+            return;
+        }
+
         if (!response.ok || (result.success === false && !result.requireUnsafe)) {
             throw new Error(result.error || `HTTP ${response.status}`);
         }
@@ -8929,6 +8951,10 @@ async function handleUrlImport() {
                     return;
                 }
                 result = await retryResp.json();
+                if (result.disabledVM) {
+                    showError(result.message || '已禁用VM');
+                    return;
+                }
             } else {
                 showInfo('已取消导入');
                 return;
@@ -8982,7 +9008,7 @@ async function uploadCustomSource(filename, content, type, allowUnsafeVM = false
     }
 
     const result = await response.json();
-    if (result.success === false && !result.requireUnsafe) {
+    if (result.success === false && !result.requireUnsafe && !result.disabledVM) {
         throw new Error(result.error || '上传失败');
     }
     return result;
@@ -9176,6 +9202,9 @@ async function renderCustomSources() {
                 `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-600">${source.owner}</span>` :
                 `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-500">公开</span>`;
 
+            const vmTag = source.allowUnsafeVM ?
+                `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-red-50 text-red-500 border border-red-100 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30">VM</span>` : '';
+
             // 权限判断：管理员有所有权限；登录用户对公开源只有查看使用（Toggle）权限，无法刷新或删除
             const isPublic = source.owner === 'open';
             const canManageSource = isAdmin || (!isPublic && isUser);
@@ -9190,6 +9219,7 @@ async function renderCustomSources() {
                         <i class="fas fa-file-code text-emerald-500 flex-shrink-0"></i>
                          ${createMarqueeHtml(source.name, "font-bold t-text-main text-sm")}
                         ${ownerTag}
+                        ${vmTag}
                     </div>
                     ${errorMsg}
                     <div class="flex flex-wrap items-center text-[10px] t-text-muted gap-x-3 gap-y-1 mt-1.5">
@@ -9338,6 +9368,11 @@ async function toggleSource(sourceId, currentEnabled, allowUnsafeVM = false) {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const result = await response.json();
+
+        if (result.disabledVM) {
+            showError(result.message || '已禁用VM');
+            return;
+        }
 
         // 处理 REQUIRE_UNSAFE_VM
         if (result.requireUnsafe) {

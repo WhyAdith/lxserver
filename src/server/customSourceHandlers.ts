@@ -71,6 +71,7 @@ export async function handleValidate(req: IncomingMessage, res: ServerResponse) 
                 valid: false,
                 error: result.error,
                 requireUnsafe: result.requireUnsafe,
+                disabledVM: result.requireUnsafe && !global.lx.config['system.allowUnsafeVM'],
                 metadata // 即使验证失败也返回元数据，方便前端展示
             }))
         }
@@ -173,11 +174,31 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
         // 获取脚本信息
         const { metadata, supportedSources, requireUnsafe } = await getScriptInfo(content, allowUnsafeVM)
 
-        // 如果检测到需要不安全模式但未提供标志，则要求确认
-        if (requireUnsafe && !allowUnsafeVM) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))
-            return
+        // 核心安全校验：若脚本需要或者指定了 unsafe VM 模式，则必须验证管理员身份
+        if (requireUnsafe || allowUnsafeVM) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+                res.writeHead(403, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, error: '允许以 VM 模式运行脚本需要验证管理员身份。' }))
+                return
+            }
+        }
+
+        // 如果检测到需要不安全模式
+        if (requireUnsafe) {
+            // 如果系统已禁用 VM 模式
+            if (!global.lx.config['system.allowUnsafeVM']) {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, disabledVM: true, error: 'VM_DISABLED', message: '已禁用VM。该脚本需要原生 VM 模式运行，但服务器后台已禁用 VM 模式。' }))
+                return
+            }
+
+            // 如果未提供标志，则要求确认
+            if (!allowUnsafeVM) {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))
+                return
+            }
         }
 
         // 生成唯一ID（可读的文件名）
@@ -278,11 +299,31 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
         // 获取脚本信息
         const { metadata, supportedSources, requireUnsafe } = await getScriptInfo(content, allowUnsafeVM)
 
-        // 如果检测到需要不安全模式但未提供标志，则要求确认
-        if (requireUnsafe && !allowUnsafeVM) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))
-            return
+        // 核心安全校验：若脚本需要或者指定了 unsafe VM 模式，则必须验证管理员身份
+        if (requireUnsafe || allowUnsafeVM) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+                res.writeHead(403, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, error: '允许以 VM 模式运行脚本需要验证管理员身份。' }))
+                return
+            }
+        }
+
+        // 如果检测到需要不安全模式
+        if (requireUnsafe) {
+            // 如果系统已禁用 VM 模式
+            if (!global.lx.config['system.allowUnsafeVM']) {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, disabledVM: true, error: 'VM_DISABLED', message: '已禁用VM。该脚本需要原生 VM 模式运行，但服务器后台已禁用 VM 模式。' }))
+                return
+            }
+
+            // 如果未提供标志，则要求确认
+            if (!allowUnsafeVM) {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))
+                return
+            }
         }
 
         const targetOwner = (username && username !== 'default') ? username : 'open'
@@ -563,6 +604,16 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
         const oldEnabled = target.enabled
         const oldAllowUnsafeVM = !!target.allowUnsafeVM
 
+        // 核心安全校验：如果试图开启 VM 模式（或当前就是 VM 模式），必须要验证管理员密码
+        if (target.allowUnsafeVM || allowUnsafeVM) {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+                res.writeHead(403, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, error: '开启/运行 VM 模式脚本需要验证管理员身份。' }))
+                return
+            }
+        }
+
         // 修改逻辑：只有当参数明确为 true 时才更新为 true，防止被默认值 false 覆盖
         if (allowUnsafeVM === true) target.allowUnsafeVM = true
         target.enabled = enabled !== undefined ? enabled : !target.enabled
@@ -583,6 +634,13 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
                     target.allowUnsafeVM = oldAllowUnsafeVM
                     fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
                     await initUserApis(targetOwner)
+
+                    // 如果系统已禁用 VM 模式，直接提示已禁用
+                    if (!global.lx.config['system.allowUnsafeVM']) {
+                        res.writeHead(200, { 'Content-Type': 'application/json' })
+                        res.end(JSON.stringify({ success: false, disabledVM: true, error: 'VM_DISABLED', message: '已禁用VM。该脚本需要原生 VM 模式运行，但服务器后台已禁用 VM 模式。' }))
+                        return
+                    }
 
                     res.writeHead(200, { 'Content-Type': 'application/json' })
                     res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))

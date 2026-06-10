@@ -255,7 +255,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     const lxObject = {
         ...lxDataInside,
         utils: lxUtils,
-        request: createLxRequest(!!apiInfo.allowUnsafeVM),
+        request: createLxRequest(!!apiInfo.allowUnsafeVM && !!global.lx.config['system.allowUnsafeVM']),
         send: (eventName: string, data: any) => {
             const dData = decontextify(data)
             // console.log(`[UserApi-${fullApiInfo.name}] send:`, eventName)
@@ -317,7 +317,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     sandbox.globalThis = sandbox
 
     try {
-        if (apiInfo.allowUnsafeVM) {
+        if (apiInfo.allowUnsafeVM && global.lx.config['system.allowUnsafeVM']) {
             console.log(`[UserApi] ${fullApiInfo.name} 正在以原生 VM 模式启动...`)
             const vm = require('vm')
             const context = vm.createContext(sandbox)
@@ -352,7 +352,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
             new Promise((_, reject) => setTimeout(() => reject(new Error('初始化超时，请确保脚本调用了 lx.send("inited", ...)')), 3000))
         ])
 
-        // 保存加载的 API
+        // 保存加载 of the API
         const apiInstance = {
             info: { ...fullApiInfo, sources: registeredSources },
             handlers: eventHandlers,
@@ -363,7 +363,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
 
                     // 核心修复：如果是原生 VM 模式，将传入数据 JSON 化以纯净化原型链（确保它是 VM 内的对象）
                     let inputData = { action, source, info }
-                    if (apiInfo.allowUnsafeVM) {
+                    if (apiInfo.allowUnsafeVM && global.lx.config['system.allowUnsafeVM']) {
                         inputData = JSON.parse(JSON.stringify(inputData))
                     }
 
